@@ -564,11 +564,6 @@ export default function PropertyLedger() {
                 “{p.notes}”
               </div>
             )}
-            {p.brokerId && brokerName(p.brokerId) && (
-              <div style={{ borderTop: "1px dashed var(--paper-line)", padding: "6px 12px", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--teal)" }}>
-                <Briefcase size={12} /> {brokerName(p.brokerId)}
-              </div>
-            )}
             {(p.ownerName || p.ownerContact) && (
               <div style={{ borderTop: "1px dashed var(--paper-line)", padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
                 <div style={{ display: "flex", gap: 14, color: "var(--ink-soft)", flexWrap: "wrap" }}>
@@ -623,78 +618,11 @@ export default function PropertyLedger() {
             )}
           </div>
         ))}
-
-        {view === "brokers" && !loading && filteredBrokers.length === 0 && (
-          <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--ink-soft)" }}>
-            <Briefcase size={30} style={{ opacity: 0.4, marginBottom: 10 }} />
-            <div className="font-display" style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
-              {brokers.length === 0 ? "ഇതുവരെ ബ്രോക്കർമാരെ ചേർത്തിട്ടില്ല" : "ഫലങ്ങളൊന്നും കിട്ടിയില്ല"}
-            </div>
-            <div style={{ fontSize: 13 }}>{brokers.length === 0 ? "താഴെയുള്ള + ബട്ടൺ അമർത്തി ആദ്യത്തെ ബ്രോക്കറെ ചേർക്കുക" : "വേറെ വാക്കുകൾ ഉപയോഗിച്ച് നോക്കൂ"}</div>
-          </div>
-        )}
-
-        {view === "brokers" && filteredBrokers.map((b) => (
-          <div
-            key={b.id}
-            onClick={() => confirmDeleteBroker !== b.id && openEditBroker(b)}
-            style={{ background: "#FFFFFF", border: "1px solid var(--paper-line)", borderRadius: 12, overflow: "hidden", position: "relative", cursor: "pointer", padding: "12px 14px" }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
-              <div style={{ minWidth: 0 }}>
-                <div className="font-display" style={{ fontSize: 15.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-                  <Briefcase size={14} color="var(--teal)" />
-                  {b.name}
-                </div>
-                {b.agency && <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>{b.agency}</div>}
-              </div>
-              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); openEditBroker(b); }}
-                  style={{ border: "none", background: "transparent", color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
-                  aria-label="എഡിറ്റ് ചെയ്യുക"
-                >
-                  <Pencil size={15} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteBroker(b.id); }}
-                  style={{ border: "none", background: "transparent", color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
-                  aria-label="ഡിലീറ്റ് ചെയ്യുക"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 14, fontSize: 12.5, color: "var(--ink-soft)", flexWrap: "wrap", marginTop: 6 }}>
-              {b.contact && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Phone size={12} />{b.contact}</span>}
-              {b.area && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><MapPin size={12} />{b.area}</span>}
-              {b.commission && <span>കമ്മീഷൻ: {b.commission}</span>}
-            </div>
-            {b.notes && (
-              <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px dashed var(--paper-line)", fontSize: 12.5, fontStyle: "italic" }}>
-                “{b.notes}”
-              </div>
-            )}
-
-            {confirmDeleteBroker === b.id && (
-              <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", inset: 0, background: "rgba(36,50,43,0.92)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 16 }}>
-                <div style={{ color: "#F4F1E4", fontSize: 13, textAlign: "center" }}>ഈ ബ്രോക്കറെ ഡിലീറ്റ് ചെയ്യണോ?</div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => deleteBroker(b.id)} style={{ background: "var(--stamp)", color: "#fff", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>ഡിലീറ്റ് ചെയ്യുക</button>
-                  <button onClick={() => setConfirmDeleteBroker(null)} style={{ background: "transparent", color: "#F4F1E4", border: "1px solid rgba(244,241,228,0.4)", borderRadius: 7, padding: "7px 16px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>വേണ്ട</button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
       </div>
 
       {/* FAB */}
       <button
-        onClick={() => {
-          if (view === "properties") { setForm(emptyForm); setEditingId(null); setError(""); setShowForm(true); }
-          else { setBrokerForm(emptyBrokerForm); setEditingBrokerId(null); setError(""); setShowBrokerForm(true); }
-        }}
+        onClick={() => { setForm(emptyForm); setEditingId(null); setError(""); setShowForm(true); }}
         style={{
           position: "fixed", bottom: 20, right: 20, width: 54, height: 54, borderRadius: "50%",
           background: "var(--teal)", color: "#fff", border: "none", boxShadow: "0 6px 18px rgba(31,91,76,0.4)",
@@ -867,29 +795,6 @@ export default function PropertyLedger() {
               <Field label="കോൺടാക്റ്റ് നമ്പർ" value={form.ownerContact} onChange={(v) => setForm((f) => ({ ...f, ownerContact: v }))} placeholder="ഫോൺ നമ്പർ" type="tel" inputMode="numeric" />
 
               <div>
-                <label style={labelStyle}>ബ്രോക്കർ</label>
-                {brokers.length === 0 ? (
-                  <div style={{ fontSize: 12.5, color: "var(--ink-soft)", background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "10px 12px" }}>
-                    ബ്രോക്കർമാരെ ഇതുവരെ ചേർത്തിട്ടില്ല — "ബ്രോക്കർമാർ" ടാബിൽ പോയി ചേർക്കാം
-                  </div>
-                ) : (
-                  <select
-                    value={form.brokerId}
-                    onChange={(e) => setForm((f) => ({ ...f, brokerId: e.target.value }))}
-                    style={{
-                      width: "100%", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "10px 12px",
-                      fontSize: 14, background: "#fff", color: "var(--ink)", fontFamily: "inherit", outline: "none",
-                    }}
-                  >
-                    <option value="">ബ്രോക്കർ ഇല്ല</option>
-                    {brokers.map((b) => (
-                      <option key={b.id} value={b.id}>{b.name}{b.agency ? ` (${b.agency})` : ""}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              <div>
                 <label style={labelStyle}>കുറിപ്പുകൾ</label>
                 <textarea
                   value={form.notes}
@@ -934,56 +839,6 @@ export default function PropertyLedger() {
                 }}
               >
                 {saving ? "സേവ് ചെയ്യുന്നു..." : editingId ? "അപ്ഡേറ്റ് ചെയ്യുക" : "സേവ് ചെയ്യുക"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Broker Form Modal */}
-      {showBrokerForm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(36,50,43,0.55)", display: "flex", alignItems: "flex-end", zIndex: 50 }}>
-          <div style={{ background: "var(--paper)", width: "100%", maxHeight: "88vh", overflowY: "auto", borderRadius: "18px 18px 0 0", padding: "18px 18px 24px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <div className="font-display" style={{ fontSize: 18, fontWeight: 700 }}>
-                {editingBrokerId ? "ബ്രോക്കർ എഡിറ്റ് ചെയ്യുക" : "പുതിയ ബ്രോക്കർ"}
-              </div>
-              <button onClick={() => { setShowBrokerForm(false); setEditingBrokerId(null); }} style={{ border: "none", background: "#fff", borderRadius: 8, padding: 6, cursor: "pointer" }}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <Field label="പേര് *" value={brokerForm.name} onChange={(v) => setBrokerForm((f) => ({ ...f, name: v }))} placeholder="ബ്രോക്കറുടെ പേര്" />
-              <Field label="കോൺടാക്റ്റ് നമ്പർ" value={brokerForm.contact} onChange={(v) => setBrokerForm((f) => ({ ...f, contact: v }))} placeholder="ഫോൺ നമ്പർ" type="tel" inputMode="numeric" />
-              <Field label="ഏജൻസി" value={brokerForm.agency} onChange={(v) => setBrokerForm((f) => ({ ...f, agency: v }))} placeholder="ഏജൻസി / സ്ഥാപനത്തിന്റെ പേര്" />
-              <Field label="പ്രവർത്തന മേഖല" value={brokerForm.area} onChange={(v) => setBrokerForm((f) => ({ ...f, area: v }))} placeholder="ഉദാ: എറണാകുളം, ആലുവ" />
-              <Field label="കമ്മീഷൻ" value={brokerForm.commission} onChange={(v) => setBrokerForm((f) => ({ ...f, commission: v }))} placeholder="ഉദാ: 1%" />
-
-              <div>
-                <label style={labelStyle}>കുറിപ്പുകൾ</label>
-                <textarea
-                  value={brokerForm.notes}
-                  onChange={(e) => setBrokerForm((f) => ({ ...f, notes: e.target.value }))}
-                  placeholder="മറ്റ് വിവരങ്ങൾ..."
-                  rows={3}
-                  style={{
-                    width: "100%", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "10px 12px",
-                    fontSize: 14, background: "#fff", color: "var(--ink)", fontFamily: "inherit", outline: "none", resize: "vertical",
-                  }}
-                />
-              </div>
-
-              <button
-                onClick={saveBroker}
-                disabled={savingBroker}
-                style={{
-                  marginTop: 6, background: "var(--teal)", color: "#fff", border: "none", borderRadius: 10,
-                  padding: "13px 0", fontSize: 15, fontWeight: 700, cursor: savingBroker ? "default" : "pointer",
-                  opacity: savingBroker ? 0.7 : 1, fontFamily: "inherit",
-                }}
-              >
-                {savingBroker ? "സേവ് ചെയ്യുന്നു..." : editingBrokerId ? "അപ്ഡേറ്റ് ചെയ്യുക" : "സേവ് ചെയ്യുക"}
               </button>
             </div>
           </div>
