@@ -97,6 +97,11 @@ const ShieldCheck = makeIcon("\uD83D\uDEE1\uFE0F");
 const Share2 = makeIcon("\uD83D\uDCE4");
 const Bell = makeIcon("\uD83D\uDD14");
 const Filter = makeIcon("\u2699\uFE0F");
+const ArrowLeft = makeIcon("\u2190");
+const Paperclip = makeIcon("\uD83D\uDCCE");
+const ChartBar = makeIcon("\uD83D\uDCCA");
+const CallIcon = makeIcon("\uD83D\uDCDE");
+const WhatsIcon = makeIcon("\uD83D\uDCAC");
 
 
 const FONT_STYLE = `
@@ -141,20 +146,21 @@ function LogoMark({ size = 60, ring = true, className = "" }) {
   );
 }
 
-function compressImage(file) {
+function compressImage(file, maxW, quality) {
+  maxW = maxW || 480;
+  quality = quality || 0.6;
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
       img.onload = () => {
-        const maxW = 480;
         const scale = Math.min(1, maxW / img.width);
         const canvas = document.createElement("canvas");
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.6));
+        resolve(canvas.toDataURL("image/jpeg", quality));
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -164,12 +170,46 @@ function compressImage(file) {
   });
 }
 
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function getPhotos(p) {
+  if (p.photos && p.photos.length) return p.photos;
+  if (p.photo) return [p.photo];
+  return [];
+}
+
+function getDocuments(p) {
+  return p.documents || [];
+}
+
 const emptyForm = {
   type: TYPES[0], purpose: PURPOSES[0], status: STATUSES_SALE[0], price: "", location: "", size: "",
   rentAmount: "", deposit: "", furnishing: "", availableFrom: "",
   surveyNumber: "", landmark: "", roadWidth: "", amenities: [], negotiable: false,
-  ownerName: "", ownerContact: "", brokerId: "", notes: "", photo: "", followUpDate: "",
+  ownerName: "", ownerContact: "", brokerId: "", notes: "", photos: [], documents: [], followUpDate: "",
 };
+
+function computeStats(properties) {
+  const now = new Date();
+  const stats = { sale: 0, rent: 0, closed: 0, thisMonth: 0 };
+  properties.forEach((p) => {
+    if (p.purpose === "വാടക") stats.rent += 1;
+    else stats.sale += 1;
+    if (p.status === "വിറ്റു" || p.status === "വാടകയ്ക്ക് കൊടുത്തു") stats.closed += 1;
+    if (p.createdAt) {
+      const d = new Date(p.createdAt);
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) stats.thisMonth += 1;
+    }
+  });
+  return stats;
+}
 
 const SORT_OPTIONS = [
   { id: "date_desc", label: "പുതിയത് ആദ്യം" },
@@ -230,7 +270,9 @@ function PropertyLedger() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
   const fileInputRef = useRef(null);
+  const docInputRef = useRef(null);
   const backupInputRef = useRef(null);
+  const [detailId, setDetailId] = useState(null);
 
   const [brokers, setBrokers] = useState([]);
   const [showBrokerForm, setShowBrokerForm] = useState(false);
@@ -287,14 +329,45 @@ function PropertyLedger() {
   }
 
   async function handlePhotoChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
     try {
-      const dataUrl = await compressImage(file);
-      setForm((f) => ({ ...f, photo: dataUrl }));
+      const dataUrls = await Promise.all(files.map((f) => compressImage(f, 480, 0.6)));
+      setForm((f) => ({ ...f, photos: [...(f.photos || []), ...dataUrls] }));
     } catch {
       setError("ഫോട്ടോ പ്രോസസ് ചെയ്യുന്നതിൽ പിശക്.");
     }
+  }
+
+  function removePhoto(index) {
+    setForm((f) => ({ ...f, photos: (f.photos || []).filter((_, i) => i !== index) }));
+  }
+
+  async function handleDocumentChange(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    try {
+      const items = [];
+      for (const file of files) {
+        const isImage = file.type.startsWith("image/");
+        const dataUrl = isImage ? await compressImage(file, 1000, 0.7) : await readAsDataUrl(file);
+        items.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: file.name || "ഡോക്യുമെന്റ്",
+          dataUrl,
+          isImage,
+        });
+      }
+      setForm((f) => ({ ...f, documents: [...(f.documents || []), ...items] }));
+    } catch {
+      setError("ഡോക്യുമെന്റ് ചേർക്കുന്നതിൽ പിശക്.");
+    }
+  }
+
+  function removeDocument(id) {
+    setForm((f) => ({ ...f, documents: (f.documents || []).filter((d) => d.id !== id) }));
   }
 
   async function saveProperty() {
@@ -305,7 +378,8 @@ function PropertyLedger() {
     setSaving(true);
     setError("");
     const id = editingId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const record = { ...form, id, createdAt: form.createdAt || Date.now() };
+    const { photo, ...rest } = form;
+    const record = { ...rest, id, createdAt: form.createdAt || Date.now() };
     try {
       const result = await window.storage.set(`property:${id}`, JSON.stringify(record), false);
       if (!result) throw new Error("save failed");
@@ -323,10 +397,14 @@ function PropertyLedger() {
   }
 
   function openEdit(p) {
-    setForm({ ...emptyForm, ...p });
+    setForm({ ...emptyForm, ...p, photos: getPhotos(p), documents: getDocuments(p) });
     setEditingId(p.id);
     setError("");
     setShowForm(true);
+  }
+
+  function openDetail(p) {
+    setDetailId(p.id);
   }
 
   async function deleteProperty(id) {
@@ -619,6 +697,8 @@ function PropertyLedger() {
     return [b.name, b.contact, b.agency, b.area].join(" ").toLowerCase().includes(q);
   });
 
+  const detailProperty = detailId ? properties.find((x) => x.id === detailId) : null;
+
   return (
     <div className="font-body" style={{ minHeight: "100vh", background: "var(--paper)", color: "var(--ink)" }}>
       <style>{FONT_STYLE}</style>
@@ -699,6 +779,30 @@ function PropertyLedger() {
           </div>
         </div>
       </div>
+
+      {/* Dashboard */}
+      {view === "properties" && properties.length > 0 && (() => {
+        const stats = computeStats(properties);
+        const cards = [
+          { label: "വില്പനയ്ക്ക്", value: stats.sale, color: "var(--teal)" },
+          { label: "വാടകയ്ക്ക്", value: stats.rent, color: "#B8791A" },
+          { label: "ക്ലോസ്ഡ്", value: stats.closed, color: "var(--stamp)" },
+          { label: "ഈ മാസം", value: stats.thisMonth, color: "var(--teal-dark)" },
+        ];
+        return (
+          <div style={{ display: "flex", gap: 8, padding: "12px 16px 0", overflowX: "auto" }}>
+            {cards.map((c) => (
+              <div key={c.label} style={{
+                flex: "1 0 auto", minWidth: 78, background: "#FFFFFF", border: "1px solid var(--paper-line)",
+                borderRadius: 10, padding: "8px 10px", textAlign: "center",
+              }}>
+                <div className="font-display" style={{ fontSize: 18, fontWeight: 700, color: c.color }}>{c.value}</div>
+                <div style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 1, whiteSpace: "nowrap" }}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, padding: "12px 16px 0" }}>
@@ -841,12 +945,19 @@ function PropertyLedger() {
         {view === "properties" && filtered.map((p, idx) => (
           <div
             key={p.id}
-            onClick={() => confirmDelete !== p.id && openEdit(p)}
+            onClick={() => confirmDelete !== p.id && openDetail(p)}
             style={{ background: "#FFFFFF", border: "1px solid var(--paper-line)", borderRadius: 12, overflow: "hidden", position: "relative", cursor: "pointer" }}
           >
             <div style={{ display: "flex" }}>
-              {p.photo ? (
-                <img src={p.photo} alt="" style={{ width: 96, height: 96, objectFit: "cover", flexShrink: 0 }} />
+              {getPhotos(p).length > 0 ? (
+                <div style={{ width: 96, height: 96, flexShrink: 0, position: "relative" }}>
+                  <img src={getPhotos(p)[0]} alt="" style={{ width: 96, height: 96, objectFit: "cover", display: "block" }} />
+                  {getPhotos(p).length > 1 && (
+                    <div style={{ position: "absolute", bottom: 3, right: 3, background: "rgba(21,63,53,0.8)", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 5px" }}>
+                      +{getPhotos(p).length - 1}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div style={{ width: 96, height: 96, flexShrink: 0, background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <ImageIcon size={22} color="var(--paper-line)" />
@@ -1283,23 +1394,77 @@ function PropertyLedger() {
               </div>
 
               <div>
-                <label style={labelStyle}>ഫോട്ടോ</label>
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoChange} style={{ display: "none" }} />
+                <label style={labelStyle}>ഫോട്ടോകൾ</label>
+                <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handlePhotoChange} style={{ display: "none" }} />
+                {form.photos && form.photos.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 8, paddingBottom: 2 }}>
+                    {form.photos.map((ph, i) => (
+                      <div key={i} style={{ position: "relative", flexShrink: 0 }}>
+                        <img src={ph} alt="" style={{ width: 76, height: 76, objectFit: "cover", borderRadius: 8, display: "block" }} />
+                        <button
+                          onClick={() => removePhoto(i)}
+                          style={{
+                            position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                            background: "var(--stamp)", color: "#fff", border: "2px solid #fff", cursor: "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                          }}
+                          aria-label="ഫോട്ടോ നീക്കം ചെയ്യുക"
+                        >
+                          <X size={9} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   style={{
-                    border: "1.5px dashed var(--paper-line)", borderRadius: 10, padding: form.photo ? 0 : 20,
-                    textAlign: "center", cursor: "pointer", background: "#fff", overflow: "hidden",
+                    border: "1.5px dashed var(--paper-line)", borderRadius: 10, padding: 16,
+                    textAlign: "center", cursor: "pointer", background: "#fff",
                   }}
                 >
-                  {form.photo ? (
-                    <img src={form.photo} alt="" style={{ width: "100%", maxHeight: 160, objectFit: "cover", display: "block" }} />
-                  ) : (
-                    <div style={{ color: "var(--ink-soft)", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                      <ImageIcon size={22} />
-                      ഫോട്ടോ ചേർക്കാൻ ടാപ്പ് ചെയ്യുക
-                    </div>
-                  )}
+                  <div style={{ color: "var(--ink-soft)", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <ImageIcon size={20} />
+                    {form.photos && form.photos.length > 0 ? "കൂടുതൽ ഫോട്ടോ ചേർക്കുക" : "ഫോട്ടോ ചേർക്കാൻ ടാപ്പ് ചെയ്യുക"}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label style={labelStyle}>ഡോക്യുമെന്റുകൾ (ആധാരം, ടാക്സ് രസീത് മുതലായവ)</label>
+                <input ref={docInputRef} type="file" accept="image/*,.pdf" multiple onChange={handleDocumentChange} style={{ display: "none" }} />
+                {form.documents && form.documents.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    {form.documents.map((d) => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "7px 10px" }}>
+                        {d.isImage ? (
+                          <img src={d.dataUrl} alt="" style={{ width: 30, height: 30, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                        ) : (
+                          <Paperclip size={16} color="var(--ink-soft)" />
+                        )}
+                        <span style={{ fontSize: 12.5, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                        <button
+                          onClick={() => removeDocument(d.id)}
+                          style={{ border: "none", background: "transparent", color: "var(--stamp)", cursor: "pointer", padding: 3 }}
+                          aria-label="ഡോക്യുമെന്റ് നീക്കം ചെയ്യുക"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div
+                  onClick={() => docInputRef.current?.click()}
+                  style={{
+                    border: "1.5px dashed var(--paper-line)", borderRadius: 10, padding: 14,
+                    textAlign: "center", cursor: "pointer", background: "#fff",
+                  }}
+                >
+                  <div style={{ color: "var(--ink-soft)", fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                    <Paperclip size={20} />
+                    ഡോക്യുമെന്റ് ചേർക്കാൻ ടാപ്പ് ചെയ്യുക
+                  </div>
                 </div>
               </div>
 
@@ -1401,11 +1566,168 @@ function PropertyLedger() {
           </div>
         </div>
       )}
+
+      {/* Detail View */}
+      {detailProperty && (
+        <div style={{ position: "fixed", inset: 0, background: "var(--paper)", zIndex: 70, overflowY: "auto" }}>
+          <div style={{ background: "var(--teal-dark)", color: "#F4F1E4", padding: "16px 14px", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 5 }}>
+            <button onClick={() => setDetailId(null)} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="തിരികെ പോകുക">
+              <ArrowLeft size={16} />
+            </button>
+            <div className="font-display" style={{ fontSize: 16, fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {detailProperty.location}
+            </div>
+            <button onClick={() => shareProperty(detailProperty, brokerName(detailProperty.brokerId))} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="ഷെയർ ചെയ്യുക">
+              <Share2 size={16} />
+            </button>
+          </div>
+
+          {getPhotos(detailProperty).length > 0 ? (
+            <div style={{ display: "flex", overflowX: "auto", scrollSnapType: "x mandatory" }}>
+              {getPhotos(detailProperty).map((ph, i) => (
+                <img key={i} src={ph} alt="" style={{ width: "100%", flex: "0 0 100%", height: 230, objectFit: "cover", scrollSnapAlign: "start" }} />
+              ))}
+            </div>
+          ) : (
+            <div style={{ width: "100%", height: 160, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ImageIcon size={30} color="var(--paper-line)" />
+            </div>
+          )}
+
+          <div style={{ padding: "14px 16px 90px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--teal)", background: "#E7EFEB", borderRadius: 5, padding: "2px 8px" }}>{detailProperty.type}</span>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: detailProperty.purpose === "വാടക" ? "#B8791A" : "var(--teal)",
+                background: detailProperty.purpose === "വാടക" ? "#FBF0DD" : "#E7EFEB", borderRadius: 5, padding: "2px 8px",
+              }}>{detailProperty.purpose}</span>
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: STATUS_COLOR[detailProperty.status] || "var(--stamp)",
+                border: `1.5px solid ${STATUS_COLOR[detailProperty.status] || "var(--stamp)"}`, borderRadius: 5, padding: "2px 8px",
+              }}>{detailProperty.status}</span>
+            </div>
+
+            {reminderStatus(detailProperty) && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 700, width: "fit-content",
+                color: reminderStatus(detailProperty) === "upcoming" ? "var(--teal-dark)" : "#fff",
+                background: reminderStatus(detailProperty) === "overdue" ? "var(--stamp)" : reminderStatus(detailProperty) === "today" ? "#B8791A" : "#E7EFEB",
+                borderRadius: 6, padding: "4px 10px",
+              }}>
+                <Bell size={12} />
+                {reminderStatus(detailProperty) === "overdue" ? "ഫോളോ-അപ്പ് വൈകി" : reminderStatus(detailProperty) === "today" ? "ഇന്ന് ഫോളോ-അപ്പ്" : `ഫോളോ-അപ്പ്: ${detailProperty.followUpDate}`}
+              </div>
+            )}
+
+            <div style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 12, padding: "14px" }}>
+              {detailProperty.purpose === "വാടക" ? (
+                <>
+                  {detailProperty.rentAmount && <DetailRow label="വാടക" value={`\u20B9${detailProperty.rentAmount}/മാസം`} />}
+                  {detailProperty.deposit && <DetailRow label="അഡ്വാൻസ്/ഡെപ്പോസിറ്റ്" value={detailProperty.deposit} />}
+                  {detailProperty.furnishing && <DetailRow label="ഫർണിഷിംഗ്" value={detailProperty.furnishing} />}
+                  {detailProperty.availableFrom && <DetailRow label="ലഭ്യമായ തീയതി" value={detailProperty.availableFrom} />}
+                </>
+              ) : (
+                detailProperty.price && <DetailRow label="വില" value={`\u20B9${detailProperty.price}${detailProperty.negotiable ? " (വിലപേശാം)" : ""}`} />
+              )}
+              {detailProperty.size && <DetailRow label="സൈസ്" value={detailProperty.size} />}
+              {detailProperty.surveyNumber && <DetailRow label="സർവേ നമ്പർ" value={detailProperty.surveyNumber} />}
+              {detailProperty.landmark && <DetailRow label="അടുത്തുള്ള സ്ഥലങ്ങൾ" value={detailProperty.landmark} />}
+              {detailProperty.roadWidth && <DetailRow label="റോഡ് വീതി" value={detailProperty.roadWidth} />}
+            </div>
+
+            {detailProperty.amenities && detailProperty.amenities.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {detailProperty.amenities.map((a) => (
+                  <span key={a} style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 20, padding: "4px 12px", fontSize: 12.5 }}>{a}</span>
+                ))}
+              </div>
+            )}
+
+            {(detailProperty.ownerName || detailProperty.ownerContact) && (
+              <div style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 12, padding: "14px" }}>
+                {detailProperty.ownerName && <DetailRow label="ഉടമയുടെ പേര്" value={detailProperty.ownerName} />}
+                {detailProperty.ownerContact && <DetailRow label="കോൺടാക്റ്റ്" value={detailProperty.ownerContact} />}
+                {detailProperty.ownerContact && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                    <a href={`tel:${detailProperty.ownerContact}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--teal)", color: "#fff", borderRadius: 8, padding: "8px 0", fontSize: 13, textDecoration: "none" }}>
+                      <CallIcon size={13} /> കോൾ ചെയ്യുക
+                    </a>
+                    <a href={`https://wa.me/${detailProperty.ownerContact.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#25A366", color: "#fff", borderRadius: 8, padding: "8px 0", fontSize: 13, textDecoration: "none" }}>
+                      <WhatsIcon size={13} /> WhatsApp
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {detailProperty.brokerId && brokerName(detailProperty.brokerId) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--teal)" }}>
+                <Briefcase size={14} /> {brokerName(detailProperty.brokerId)}
+              </div>
+            )}
+
+            {detailProperty.notes && (
+              <div style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 12, padding: "12px 14px", fontSize: 13.5, fontStyle: "italic" }}>
+                “{detailProperty.notes}”
+              </div>
+            )}
+
+            {getDocuments(detailProperty).length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 6 }}>ഡോക്യുമെന്റുകൾ</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {getDocuments(detailProperty).map((d) => (
+                    <a
+                      key={d.id}
+                      href={d.dataUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "9px 12px", textDecoration: "none", color: "var(--ink)" }}
+                    >
+                      {d.isImage ? (
+                        <img src={d.dataUrl} alt="" style={{ width: 30, height: 30, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                      ) : (
+                        <Paperclip size={16} color="var(--ink-soft)" />
+                      )}
+                      <span style={{ fontSize: 13, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                onClick={() => { openEdit(detailProperty); }}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--teal)", color: "#fff", border: "none", borderRadius: 9, padding: "11px 0", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <Pencil size={14} /> എഡിറ്റ് ചെയ്യുക
+              </button>
+              <button
+                onClick={() => { setConfirmDelete(detailProperty.id); setDetailId(null); }}
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#fff", color: "var(--stamp)", border: "1.5px solid var(--stamp)", borderRadius: 9, padding: "11px 16px", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 const labelStyle = { display: "block", fontSize: 12, color: "var(--ink-soft)", marginBottom: 5, fontWeight: 700 };
+
+function DetailRow({ label, value }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 0", borderBottom: "1px dashed var(--paper-line)" }}>
+      <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{label}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 700, textAlign: "right" }}>{value}</span>
+    </div>
+  );
+}
 
 function Field({ label, value, onChange, placeholder, type = "text", inputMode }) {
   return (
