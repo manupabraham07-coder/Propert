@@ -94,6 +94,9 @@ const Upload = makeIcon("\u2B06\uFE0F");
 const Pencil = makeIcon("\u270F\uFE0F");
 const Briefcase = makeIcon("\uD83D\uDCBC");
 const ShieldCheck = makeIcon("\uD83D\uDEE1\uFE0F");
+const Share2 = makeIcon("\uD83D\uDCE4");
+const Bell = makeIcon("\uD83D\uDD14");
+const Filter = makeIcon("\u2699\uFE0F");
 
 
 const FONT_STYLE = `
@@ -165,8 +168,50 @@ const emptyForm = {
   type: TYPES[0], purpose: PURPOSES[0], status: STATUSES_SALE[0], price: "", location: "", size: "",
   rentAmount: "", deposit: "", furnishing: "", availableFrom: "",
   surveyNumber: "", landmark: "", roadWidth: "", amenities: [], negotiable: false,
-  ownerName: "", ownerContact: "", brokerId: "", notes: "", photo: "",
+  ownerName: "", ownerContact: "", brokerId: "", notes: "", photo: "", followUpDate: "",
 };
+
+const SORT_OPTIONS = [
+  { id: "date_desc", label: "പുതിയത് ആദ്യം" },
+  { id: "date_asc", label: "പഴയത് ആദ്യം" },
+  { id: "followup", label: "ഫോളോ-അപ്പ് അടുത്തത്" },
+];
+
+function reminderStatus(p) {
+  if (!p.followUpDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const fd = new Date(p.followUpDate);
+  if (isNaN(fd.getTime())) return null;
+  fd.setHours(0, 0, 0, 0);
+  if (fd.getTime() < today.getTime()) return "overdue";
+  if (fd.getTime() === today.getTime()) return "today";
+  return "upcoming";
+}
+
+function shareProperty(p, brokerLabel) {
+  const lines = [];
+  lines.push(`*${p.location || ""}*`);
+  lines.push(`${p.type || ""} | ${p.purpose || ""}${p.purpose === "വാടക" ? "" : (p.status ? " | " + p.status : "")}`);
+  if (p.purpose === "വാടക") {
+    if (p.rentAmount) lines.push(`വാടക: \u20B9${p.rentAmount}/മാസം`);
+    if (p.deposit) lines.push(`അഡ്വാൻസ്: ${p.deposit}`);
+    if (p.furnishing) lines.push(`${p.furnishing}`);
+    if (p.availableFrom) lines.push(`ലഭ്യമായ തീയതി: ${p.availableFrom}`);
+  } else {
+    if (p.price) lines.push(`വില: \u20B9${p.price}${p.negotiable ? " (വിലപേശാം)" : ""}`);
+  }
+  if (p.size) lines.push(`സൈസ്: ${p.size}`);
+  if (p.landmark) lines.push(`സമീപം: ${p.landmark}`);
+  if (p.roadWidth) lines.push(`റോഡ്: ${p.roadWidth}`);
+  if (p.amenities && p.amenities.length) lines.push(`സൗകര്യങ്ങൾ: ${p.amenities.join(", ")}`);
+  if (p.notes) lines.push(`കുറിപ്പ്: ${p.notes}`);
+  if (brokerLabel) lines.push(`ബ്രോക്കർ: ${brokerLabel}`);
+  if (p.ownerContact) lines.push(`കോൺടാക്റ്റ്: ${p.ownerContact}`);
+  const text = lines.join("\n");
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, "_blank");
+}
 
 const emptyBrokerForm = { name: "", contact: "", agency: "", area: "", commission: "", notes: "" };
 
@@ -196,6 +241,12 @@ function PropertyLedger() {
 
   const [restorePending, setRestorePending] = useState(null);
   const [restoring, setRestoring] = useState(false);
+
+  const [filterType, setFilterType] = useState("എല്ലാം");
+  const [filterPurpose, setFilterPurpose] = useState("എല്ലാം");
+  const [sortBy, setSortBy] = useState("date_desc");
+  const [remindersOnly, setRemindersOnly] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -542,11 +593,25 @@ function PropertyLedger() {
     }
   }
 
-  const filtered = properties.filter((p) => {
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return [p.location, p.type, p.purpose, p.status, p.ownerName, p.price, p.rentAmount, p.landmark, p.surveyNumber, brokerName(p.brokerId)].join(" ").toLowerCase().includes(q);
-  });
+  const filtered = properties
+    .filter((p) => {
+      const q = query.trim().toLowerCase();
+      if (q && ![p.location, p.type, p.purpose, p.status, p.ownerName, p.price, p.rentAmount, p.landmark, p.surveyNumber, brokerName(p.brokerId)].join(" ").toLowerCase().includes(q)) return false;
+      if (filterType !== "എല്ലാം" && p.type !== filterType) return false;
+      if (filterPurpose !== "എല്ലാം" && p.purpose !== filterPurpose) return false;
+      if (remindersOnly && !reminderStatus(p)) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === "date_asc") return (a.createdAt || 0) - (b.createdAt || 0);
+      if (sortBy === "followup") {
+        const fa = a.followUpDate ? new Date(a.followUpDate).getTime() : Infinity;
+        const fb = b.followUpDate ? new Date(b.followUpDate).getTime() : Infinity;
+        if (fa !== fb) return fa - fb;
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      }
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
 
   const filteredBrokers = brokers.filter((b) => {
     const q = query.trim().toLowerCase();
@@ -673,8 +738,80 @@ function PropertyLedger() {
             placeholder={view === "properties" ? "ലൊക്കേഷൻ, തരം, ഉടമ എന്നിവ തിരയുക" : "പേര്, ഏജൻസി, ഏരിയ എന്നിവ തിരയുക"}
             style={{ border: "none", outline: "none", flex: 1, fontSize: 14, background: "transparent", color: "var(--ink)", fontFamily: "inherit" }}
           />
+          {view === "properties" && (
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              aria-label="ഫിൽട്ടർ"
+              style={{
+                border: "none", background: showFilters ? "var(--teal)" : "transparent",
+                color: showFilters ? "#fff" : "var(--ink-soft)", borderRadius: 6, padding: "4px 6px", cursor: "pointer",
+              }}
+            >
+              <Filter size={15} />
+            </button>
+          )}
         </div>
       </div>
+
+      {view === "properties" && showFilters && (
+        <div style={{ padding: "10px 16px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 2 }}>
+            {["എല്ലാം", ...TYPES].map((t) => (
+              <button
+                key={t}
+                onClick={() => setFilterType(t)}
+                style={{
+                  padding: "6px 12px", borderRadius: 20, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                  border: filterType === t ? "1.5px solid var(--teal)" : "1.5px solid var(--paper-line)",
+                  background: filterType === t ? "var(--teal)" : "#fff",
+                  color: filterType === t ? "#fff" : "var(--ink)",
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {["എല്ലാം", ...PURPOSES].map((pu) => (
+              <button
+                key={pu}
+                onClick={() => setFilterPurpose(pu)}
+                style={{
+                  padding: "6px 12px", borderRadius: 20, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+                  border: filterPurpose === pu ? "1.5px solid var(--teal-dark)" : "1.5px solid var(--paper-line)",
+                  background: filterPurpose === pu ? "var(--teal-dark)" : "#fff",
+                  color: filterPurpose === pu ? "#fff" : "var(--ink)",
+                }}
+              >
+                {pu}
+              </button>
+            ))}
+            <button
+              onClick={() => setRemindersOnly((v) => !v)}
+              style={{
+                display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 20, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+                border: remindersOnly ? "1.5px solid var(--stamp)" : "1.5px solid var(--paper-line)",
+                background: remindersOnly ? "var(--stamp)" : "#fff",
+                color: remindersOnly ? "#fff" : "var(--ink)",
+              }}
+            >
+              <Bell size={12} /> റിമൈൻഡർ മാത്രം
+            </button>
+          </div>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            style={{
+              border: "1px solid var(--paper-line)", borderRadius: 8, padding: "7px 10px",
+              fontSize: 12.5, background: "#fff", color: "var(--ink)", fontFamily: "inherit", outline: "none", alignSelf: "flex-start",
+            }}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {error && (
         <div style={{ margin: "12px 16px 0", background: "#FBEAE3", color: "var(--stamp)", padding: "10px 12px", borderRadius: 8, fontSize: 13 }}>
@@ -739,6 +876,17 @@ function PropertyLedger() {
                   <MapPin size={13} color="var(--ink-soft)" style={{ flexShrink: 0 }} />
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.location}</span>
                 </div>
+                {reminderStatus(p) && (
+                  <div style={{
+                    display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, marginBottom: 3,
+                    color: reminderStatus(p) === "upcoming" ? "var(--teal-dark)" : "#fff",
+                    background: reminderStatus(p) === "overdue" ? "var(--stamp)" : reminderStatus(p) === "today" ? "#B8791A" : "#E7EFEB",
+                    borderRadius: 5, padding: "2px 7px", width: "fit-content",
+                  }}>
+                    <Bell size={10} />
+                    {reminderStatus(p) === "overdue" ? "ഫോളോ-അപ്പ് വൈകി" : reminderStatus(p) === "today" ? "ഇന്ന് ഫോളോ-അപ്പ്" : `ഫോളോ-അപ്പ്: ${p.followUpDate}`}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 12, fontSize: 12.5, color: "var(--ink-soft)", flexWrap: "wrap" }}>
                   {p.purpose === "വാടക" ? (
                     <>
@@ -792,6 +940,13 @@ function PropertyLedger() {
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button
+                    onClick={(e) => { e.stopPropagation(); shareProperty(p, brokerName(p.brokerId)); }}
+                    style={{ border: "none", background: "transparent", color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
+                    aria-label="ഷെയർ ചെയ്യുക"
+                  >
+                    <Share2 size={15} />
+                  </button>
+                  <button
                     onClick={(e) => { e.stopPropagation(); openEdit(p); }}
                     style={{ border: "none", background: "transparent", color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
                     aria-label="എഡിറ്റ് ചെയ്യുക"
@@ -810,6 +965,13 @@ function PropertyLedger() {
             )}
             {!(p.ownerName || p.ownerContact) && (
               <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); shareProperty(p, brokerName(p.brokerId)); }}
+                  style={{ border: "none", background: "rgba(255,255,255,0.85)", borderRadius: 6, color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
+                  aria-label="ഷെയർ ചെയ്യുക"
+                >
+                  <Share2 size={14} />
+                </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); openEdit(p); }}
                   style={{ border: "none", background: "rgba(255,255,255,0.85)", borderRadius: 6, color: "var(--ink-soft)", cursor: "pointer", padding: 4 }}
@@ -1103,6 +1265,8 @@ function PropertyLedger() {
                   </select>
                 )}
               </div>
+
+              <Field label="ഫോളോ-അപ്പ് തീയതി" value={form.followUpDate} onChange={(v) => setForm((f) => ({ ...f, followUpDate: v }))} type="date" />
 
               <div>
                 <label style={labelStyle}>കുറിപ്പുകൾ</label>
