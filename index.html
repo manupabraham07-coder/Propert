@@ -90,8 +90,10 @@ const Trash2 = makeIcon("\uD83D\uDDD1\uFE0F");
 const Search = makeIcon("\uD83D\uDD0D");
 const FileStack = makeIcon("\uD83D\uDCD1");
 const Download = makeIcon("\u2B07\uFE0F");
+const Upload = makeIcon("\u2B06\uFE0F");
 const Pencil = makeIcon("\u270F\uFE0F");
 const Briefcase = makeIcon("\uD83D\uDCBC");
+const ShieldCheck = makeIcon("\uD83D\uDEE1\uFE0F");
 
 
 const FONT_STYLE = `
@@ -173,6 +175,7 @@ function PropertyLedger() {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
@@ -182,6 +185,7 @@ function PropertyLedger() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
   const fileInputRef = useRef(null);
+  const backupInputRef = useRef(null);
 
   const [brokers, setBrokers] = useState([]);
   const [showBrokerForm, setShowBrokerForm] = useState(false);
@@ -190,6 +194,9 @@ function PropertyLedger() {
   const [savingBroker, setSavingBroker] = useState(false);
   const [confirmDeleteBroker, setConfirmDeleteBroker] = useState(null);
 
+  const [restorePending, setRestorePending] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+
   useEffect(() => {
     loadAll();
     loadBrokers();
@@ -197,6 +204,12 @@ function PropertyLedger() {
     const t2 = setTimeout(() => setSplashVisible(false), 1300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
+
+  useEffect(() => {
+    if (!info) return;
+    const t = setTimeout(() => setInfo(""), 3000);
+    return () => clearTimeout(t);
+  }, [info]);
 
   async function loadAll() {
     setLoading(true);
@@ -342,6 +355,85 @@ function PropertyLedger() {
   function brokerName(id) {
     const b = brokers.find((x) => x.id === id);
     return b ? b.name : "";
+  }
+
+  /* ---------- Backup (export all data as JSON) ---------- */
+  function exportBackup() {
+    try {
+      const payload = {
+        app: "property-ledger",
+        backupVersion: 1,
+        exportedAt: new Date().toISOString(),
+        properties,
+        brokers,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `property-backup-${dateStr}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setInfo("ബാക്കപ്പ് ഫയൽ ഡൗൺലോഡ് ചെയ്തു.");
+    } catch (e) {
+      setError("ബാക്കപ്പ് എടുക്കുന്നതിൽ പിശക് സംഭവിച്ചു.");
+    }
+  }
+
+  /* ---------- Restore (pick a backup JSON file) ---------- */
+  function triggerRestorePick() {
+    backupInputRef.current?.click();
+  }
+
+  async function handleRestoreFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const props = Array.isArray(data.properties) ? data.properties : [];
+      const brks = Array.isArray(data.brokers) ? data.brokers : [];
+      if (props.length === 0 && brks.length === 0) {
+        throw new Error("empty");
+      }
+      setRestorePending({ properties: props, brokers: brks });
+    } catch (err) {
+      setError("ബാക്കപ്പ് ഫയൽ വായിക്കാൻ കഴിഞ്ഞില്ല. ശരിയായ ബാക്കപ്പ് (.json) ഫയൽ തിരഞ്ഞെടുക്കുക.");
+    }
+  }
+
+  async function confirmRestore() {
+    if (!restorePending) return;
+    setRestoring(true);
+    setError("");
+    try {
+      const existingProps = await window.storage.list("property:", false);
+      for (const k of (existingProps?.keys || [])) {
+        await window.storage.delete(k, false);
+      }
+      const existingBrokers = await window.storage.list("broker:", false);
+      for (const k of (existingBrokers?.keys || [])) {
+        await window.storage.delete(k, false);
+      }
+      for (const p of restorePending.properties) {
+        if (p && p.id) await window.storage.set(`property:${p.id}`, JSON.stringify(p), false);
+      }
+      for (const b of restorePending.brokers) {
+        if (b && b.id) await window.storage.set(`broker:${b.id}`, JSON.stringify(b), false);
+      }
+      await loadAll();
+      await loadBrokers();
+      setInfo("ബാക്കപ്പിൽ നിന്ന് ഡാറ്റ വിജയകരമായി റീസ്റ്റോർ ചെയ്തു.");
+      setRestorePending(null);
+    } catch (e) {
+      setError("റീസ്റ്റോർ ചെയ്യുന്നതിൽ പിശക് സംഭവിച്ചു.");
+    } finally {
+      setRestoring(false);
+    }
   }
 
   function exportToExcel() {
@@ -499,20 +591,46 @@ function PropertyLedger() {
               <h1 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>പ്രോപ്പർട്ടി രജിസ്റ്റർ</h1>
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, gap: 8, flexWrap: "wrap" }}>
             <p style={{ margin: 0, fontSize: 13, opacity: 0.8 }}>
               {view === "properties" ? `ആകെ എൻട്രികൾ: ${properties.length}` : `ആകെ ബ്രോക്കർമാർ: ${brokers.length}`}
             </p>
-            <button
-              onClick={exportToExcel}
-              style={{
-                display: "flex", alignItems: "center", gap: 6, background: "rgba(244,241,228,0.14)",
-                color: "#F4F1E4", border: "1px solid rgba(244,241,228,0.35)", borderRadius: 8,
-                padding: "6px 12px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
-              }}
-            >
-              <Download size={13} /> എക്സൽ
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input ref={backupInputRef} type="file" accept="application/json,.json" onChange={handleRestoreFileSelected} style={{ display: "none" }} />
+              <button
+                onClick={triggerRestorePick}
+                aria-label="ബാക്കപ്പിൽ നിന്ന് റീസ്റ്റോർ ചെയ്യുക"
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, background: "rgba(244,241,228,0.14)",
+                  color: "#F4F1E4", border: "1px solid rgba(244,241,228,0.35)", borderRadius: 8,
+                  padding: "6px 10px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <Upload size={13} /> റീസ്റ്റോർ
+              </button>
+              <button
+                onClick={exportBackup}
+                aria-label="ബാക്കപ്പ് എടുക്കുക"
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, background: "rgba(244,241,228,0.14)",
+                  color: "#F4F1E4", border: "1px solid rgba(244,241,228,0.35)", borderRadius: 8,
+                  padding: "6px 10px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <ShieldCheck size={13} /> ബാക്കപ്പ്
+              </button>
+              <button
+                onClick={exportToExcel}
+                aria-label="എക്സൽ എക്സ്പോർട്ട്"
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, background: "rgba(244,241,228,0.14)",
+                  color: "#F4F1E4", border: "1px solid rgba(244,241,228,0.35)", borderRadius: 8,
+                  padding: "6px 10px", fontSize: 12.5, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                <Download size={13} /> എക്സൽ
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -561,6 +679,11 @@ function PropertyLedger() {
       {error && (
         <div style={{ margin: "12px 16px 0", background: "#FBEAE3", color: "var(--stamp)", padding: "10px 12px", borderRadius: 8, fontSize: 13 }}>
           {error}
+        </div>
+      )}
+      {info && (
+        <div style={{ margin: "12px 16px 0", background: "#E7EFEB", color: "var(--teal-dark)", padding: "10px 12px", borderRadius: 8, fontSize: 13 }}>
+          {info}
         </div>
       )}
 
@@ -1076,6 +1199,39 @@ function PropertyLedger() {
                 }}
               >
                 {savingBroker ? "സേവ് ചെയ്യുന്നു..." : editingBrokerId ? "അപ്ഡേറ്റ് ചെയ്യുക" : "സേവ് ചെയ്യുക"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Confirmation Modal */}
+      {restorePending && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(36,50,43,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: "20px 18px", width: "100%", maxWidth: 340 }}>
+            <div className="font-display" style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>
+              ബാക്കപ്പിൽ നിന്ന് റീസ്റ്റോർ ചെയ്യണോ?
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.5, marginBottom: 6 }}>
+              ഈ ബാക്കപ്പിൽ <b>{restorePending.properties.length}</b> പ്രോപ്പർട്ടികളും <b>{restorePending.brokers.length}</b> ബ്രോക്കർമാരും ഉണ്ട്.
+            </div>
+            <div style={{ fontSize: 13, color: "var(--stamp)", lineHeight: 1.5, marginBottom: 16 }}>
+              നിലവിലുള്ള എല്ലാ ഡാറ്റയും ഇത് മാറ്റിസ്ഥാപിക്കും. ഇത് പഴയപടിയാക്കാൻ കഴിയില്ല.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={confirmRestore}
+                disabled={restoring}
+                style={{ flex: 1, background: "var(--teal)", color: "#fff", border: "none", borderRadius: 8, padding: "10px 0", fontSize: 14, fontWeight: 700, cursor: restoring ? "default" : "pointer", opacity: restoring ? 0.7 : 1, fontFamily: "inherit" }}
+              >
+                {restoring ? "റീസ്റ്റോർ ചെയ്യുന്നു..." : "അതെ, റീസ്റ്റോർ ചെയ്യുക"}
+              </button>
+              <button
+                onClick={() => setRestorePending(null)}
+                disabled={restoring}
+                style={{ flex: 1, background: "#fff", color: "var(--ink)", border: "1px solid var(--paper-line)", borderRadius: 8, padding: "10px 0", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                വേണ്ട
               </button>
             </div>
           </div>
