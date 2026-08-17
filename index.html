@@ -102,6 +102,7 @@ const Paperclip = makeIcon("\uD83D\uDCCE");
 const ChartBar = makeIcon("\uD83D\uDCCA");
 const CallIcon = makeIcon("\uD83D\uDCDE");
 const WhatsIcon = makeIcon("\uD83D\uDCAC");
+const PdfIcon = makeIcon("\uD83D\uDCC4");
 
 
 const FONT_STYLE = `
@@ -253,6 +254,86 @@ function shareProperty(p, brokerLabel) {
   window.open(url, "_blank");
 }
 
+function exportPropertyPDF(p, brokerLabel) {
+  const photos = getPhotos(p);
+  const rows = [];
+  rows.push(["തരം", p.type || ""]);
+  rows.push(["വിഭാഗം", p.purpose || ""]);
+  rows.push(["സ്റ്റാറ്റസ്", p.status || ""]);
+  if (p.purpose === "വാടക") {
+    if (p.rentAmount) rows.push(["വാടക (മാസം)", `\u20B9${p.rentAmount}`]);
+    if (p.deposit) rows.push(["അഡ്വാൻസ്/ഡെപ്പോസിറ്റ്", p.deposit]);
+    if (p.furnishing) rows.push(["ഫർണിഷിംഗ്", p.furnishing]);
+    if (p.availableFrom) rows.push(["ലഭ്യമായ തീയതി", p.availableFrom]);
+  } else if (p.price) {
+    rows.push(["വില", `\u20B9${p.price}${p.negotiable ? " (വിലപേശാം)" : ""}`]);
+  }
+  if (p.size) rows.push(["സൈസ്", p.size]);
+  if (p.surveyNumber) rows.push(["സർവേ നമ്പർ", p.surveyNumber]);
+  if (p.landmark) rows.push(["അടുത്തുള്ള സ്ഥലങ്ങൾ", p.landmark]);
+  if (p.roadWidth) rows.push(["റോഡ് വീതി", p.roadWidth]);
+  if (p.amenities && p.amenities.length) rows.push(["സൗകര്യങ്ങൾ", p.amenities.join(", ")]);
+  if (p.ownerName) rows.push(["ഉടമയുടെ പേര്", p.ownerName]);
+  if (p.ownerContact) rows.push(["കോൺടാക്റ്റ്", p.ownerContact]);
+  if (brokerLabel) rows.push(["ബ്രോക്കർ", brokerLabel]);
+
+  const rowsHtml = rows.map(
+    ([k, v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`
+  ).join("");
+
+  const photosHtml = photos.length
+    ? `<div class="photos">${photos.map((ph) => `<img src="${ph}" />`).join("")}</div>`
+    : "";
+
+  const notesHtml = p.notes ? `<div class="notes">“${p.notes}”</div>` : "";
+
+  const html = `<!DOCTYPE html><html lang="ml"><head><meta charset="UTF-8">
+<title>${p.location || "പ്രോപ്പർട്ടി"}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+Malayalam:wght@500;700&family=Manjari:wght@400;700&display=swap');
+* { box-sizing: border-box; }
+body { font-family: 'Manjari', sans-serif; color: #24322B; padding: 24px; }
+h1 { font-family: 'Noto Serif Malayalam', serif; font-size: 22px; color: #153F35; margin: 0 0 4px; }
+.sub { color: #5B6B5F; font-size: 12px; margin-bottom: 16px; }
+.photos { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.photos img { width: 160px; height: 120px; object-fit: cover; border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+td { padding: 7px 4px; border-bottom: 1px dashed #DBDCC7; }
+td.k { color: #5B6B5F; width: 40%; }
+td.v { font-weight: 700; text-align: right; }
+.notes { margin-top: 16px; font-size: 13.5px; font-style: italic; padding: 10px 12px; background: #EFF0E4; border-radius: 8px; }
+@media print { body { padding: 10px; } }
+</style></head>
+<body>
+<h1>${p.location || ""}</h1>
+<div class="sub">പ്രോപ്പർട്ടി രജിസ്റ്റർ — ${new Date().toLocaleDateString("ml-IN")}</div>
+${photosHtml}
+<table>${rowsHtml}</table>
+${notesHtml}
+</body></html>`;
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } finally {
+      setTimeout(() => document.body.removeChild(iframe), 1500);
+    }
+  }, 400);
+}
+
 const emptyBrokerForm = { name: "", contact: "", agency: "", area: "", commission: "", notes: "" };
 
 function PropertyLedger() {
@@ -273,6 +354,8 @@ function PropertyLedger() {
   const docInputRef = useRef(null);
   const backupInputRef = useRef(null);
   const [detailId, setDetailId] = useState(null);
+  const [brokerDetailId, setBrokerDetailId] = useState(null);
+  const [showBackupReminder, setShowBackupReminder] = useState(false);
 
   const [brokers, setBrokers] = useState([]);
   const [showBrokerForm, setShowBrokerForm] = useState(false);
@@ -295,6 +378,18 @@ function PropertyLedger() {
     loadBrokers();
     const t1 = setTimeout(() => setSplashFading(true), 950);
     const t2 = setTimeout(() => setSplashVisible(false), 1300);
+    try {
+      const lastBackup = Number(localStorage.getItem("propertyLedgerLastBackupAt") || 0);
+      const lastDismissed = Number(localStorage.getItem("propertyLedgerBackupReminderDismissedAt") || 0);
+      const now = Date.now();
+      const weekMs = 7 * 24 * 60 * 60 * 1000;
+      const dayMs = 24 * 60 * 60 * 1000;
+      if (now - lastBackup > weekMs && now - lastDismissed > dayMs) {
+        setShowBackupReminder(true);
+      }
+    } catch (e) {
+      // ignore
+    }
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
@@ -470,6 +565,10 @@ function PropertyLedger() {
     setShowBrokerForm(true);
   }
 
+  function openBrokerDetail(b) {
+    setBrokerDetailId(b.id);
+  }
+
   async function deleteBroker(id) {
     try {
       await window.storage.delete(`broker:${id}`, false);
@@ -506,10 +605,17 @@ function PropertyLedger() {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      try { localStorage.setItem("propertyLedgerLastBackupAt", String(Date.now())); } catch (e) {}
+      setShowBackupReminder(false);
       setInfo("ബാക്കപ്പ് ഫയൽ ഡൗൺലോഡ് ചെയ്തു.");
     } catch (e) {
       setError("ബാക്കപ്പ് എടുക്കുന്നതിൽ പിശക് സംഭവിച്ചു.");
     }
+  }
+
+  function dismissBackupReminder() {
+    try { localStorage.setItem("propertyLedgerBackupReminderDismissedAt", String(Date.now())); } catch (e) {}
+    setShowBackupReminder(false);
   }
 
   /* ---------- Restore (pick a backup JSON file) ---------- */
@@ -698,6 +804,8 @@ function PropertyLedger() {
   });
 
   const detailProperty = detailId ? properties.find((x) => x.id === detailId) : null;
+  const brokerDetailBroker = brokerDetailId ? brokers.find((x) => x.id === brokerDetailId) : null;
+  const brokerDetailProperties = brokerDetailBroker ? properties.filter((p) => p.brokerId === brokerDetailBroker.id) : [];
 
   return (
     <div className="font-body" style={{ minHeight: "100vh", background: "var(--paper)", color: "var(--ink)" }}>
@@ -927,6 +1035,18 @@ function PropertyLedger() {
           {info}
         </div>
       )}
+      {showBackupReminder && (
+        <div style={{ margin: "12px 16px 0", background: "#FBF0DD", color: "#7A5310", padding: "10px 12px", borderRadius: 8, fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
+          <ShieldCheck size={14} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>കുറച്ചു നാളായി ബാക്കപ്പ് എടുത്തിട്ട്. ഇപ്പോൾ ഒരു ബാക്കപ്പ് എടുക്കണോ?</span>
+          <button onClick={exportBackup} style={{ border: "none", background: "#B8791A", color: "#fff", borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            എടുക്കുക
+          </button>
+          <button onClick={dismissBackupReminder} style={{ border: "none", background: "transparent", color: "#7A5310", cursor: "pointer", padding: 3 }} aria-label="അടയ്ക്കുക">
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* List */}
       <div style={{ padding: "14px 16px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1125,7 +1245,7 @@ function PropertyLedger() {
         {view === "brokers" && filteredBrokers.map((b) => (
           <div
             key={b.id}
-            onClick={() => confirmDeleteBroker !== b.id && openEditBroker(b)}
+            onClick={() => confirmDeleteBroker !== b.id && openBrokerDetail(b)}
             style={{ background: "#FFFFFF", border: "1px solid var(--paper-line)", borderRadius: 12, overflow: "hidden", position: "relative", cursor: "pointer", padding: "12px 14px" }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
@@ -1577,6 +1697,9 @@ function PropertyLedger() {
             <div className="font-display" style={{ fontSize: 16, fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {detailProperty.location}
             </div>
+            <button onClick={() => exportPropertyPDF(detailProperty, brokerName(detailProperty.brokerId))} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="PDF ആയി എക്സ്പോർട്ട് ചെയ്യുക">
+              <PdfIcon size={16} />
+            </button>
             <button onClick={() => shareProperty(detailProperty, brokerName(detailProperty.brokerId))} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="ഷെയർ ചെയ്യുക">
               <Share2 size={16} />
             </button>
@@ -1710,6 +1833,90 @@ function PropertyLedger() {
               >
                 <Trash2 size={14} />
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Broker Detail View */}
+      {brokerDetailBroker && (
+        <div style={{ position: "fixed", inset: 0, background: "var(--paper)", zIndex: 70, overflowY: "auto" }}>
+          <div style={{ background: "var(--teal-dark)", color: "#F4F1E4", padding: "16px 14px", display: "flex", alignItems: "center", gap: 10, position: "sticky", top: 0, zIndex: 5 }}>
+            <button onClick={() => setBrokerDetailId(null)} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="തിരികെ പോകുക">
+              <ArrowLeft size={16} />
+            </button>
+            <div className="font-display" style={{ fontSize: 16, fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {brokerDetailBroker.name}
+            </div>
+            <button onClick={() => { openEditBroker(brokerDetailBroker); setBrokerDetailId(null); }} style={{ border: "none", background: "rgba(244,241,228,0.14)", color: "#F4F1E4", borderRadius: 8, padding: 7, cursor: "pointer", display: "flex" }} aria-label="എഡിറ്റ് ചെയ്യുക">
+              <Pencil size={16} />
+            </button>
+          </div>
+
+          <div style={{ padding: "14px 16px 90px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 12, padding: "14px" }}>
+              {brokerDetailBroker.agency && <DetailRow label="ഏജൻസി" value={brokerDetailBroker.agency} />}
+              {brokerDetailBroker.contact && <DetailRow label="കോൺടാക്റ്റ്" value={brokerDetailBroker.contact} />}
+              {brokerDetailBroker.area && <DetailRow label="പ്രവർത്തന മേഖല" value={brokerDetailBroker.area} />}
+              {brokerDetailBroker.commission && <DetailRow label="കമ്മീഷൻ" value={brokerDetailBroker.commission} />}
+            </div>
+
+            {brokerDetailBroker.contact && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <a href={`tel:${brokerDetailBroker.contact}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--teal)", color: "#fff", borderRadius: 8, padding: "9px 0", fontSize: 13, textDecoration: "none" }}>
+                  <CallIcon size={13} /> കോൾ ചെയ്യുക
+                </a>
+                <a href={`https://wa.me/${brokerDetailBroker.contact.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#25A366", color: "#fff", borderRadius: 8, padding: "9px 0", fontSize: 13, textDecoration: "none" }}>
+                  <WhatsIcon size={13} /> WhatsApp
+                </a>
+              </div>
+            )}
+
+            {brokerDetailBroker.notes && (
+              <div style={{ background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 12, padding: "12px 14px", fontSize: 13.5, fontStyle: "italic" }}>
+                “{brokerDetailBroker.notes}”
+              </div>
+            )}
+
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-soft)", marginBottom: 8 }}>
+                ഈ ബ്രോക്കർ വഴിയുള്ള പ്രോപ്പർട്ടികൾ ({brokerDetailProperties.length})
+              </div>
+              {brokerDetailProperties.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--ink-soft)", background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 10, padding: "16px", textAlign: "center" }}>
+                  ഇതുവരെ പ്രോപ്പർട്ടികളൊന്നും ഈ ബ്രോക്കർ വഴി ചേർത്തിട്ടില്ല
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {brokerDetailProperties.map((p) => (
+                    <div
+                      key={p.id}
+                      onClick={() => { setBrokerDetailId(null); setDetailId(p.id); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid var(--paper-line)", borderRadius: 10, padding: "9px 10px", cursor: "pointer" }}
+                    >
+                      {getPhotos(p).length > 0 ? (
+                        <img src={getPhotos(p)[0]} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 48, height: 48, borderRadius: 6, background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <ImageIcon size={16} color="var(--paper-line)" />
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.location}</div>
+                        <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                          {p.type} · {p.purpose === "വാടക" ? (p.rentAmount ? `\u20B9${p.rentAmount}/മാസം` : "വാടക") : (p.price ? `\u20B9${p.price}` : "വില്പന")}
+                        </div>
+                      </div>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, color: STATUS_COLOR[p.status] || "var(--stamp)",
+                        border: `1.5px solid ${STATUS_COLOR[p.status] || "var(--stamp)"}`, borderRadius: 5, padding: "1px 6px", whiteSpace: "nowrap",
+                      }}>
+                        {p.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
